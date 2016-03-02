@@ -1,0 +1,785 @@
+---
+title: "Анализ смертности"
+author: "Alexey"
+date: "Friday, August 29, 2014"
+output: html_document
+---
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+default.par = par()
+setwd("C:/Users/Alexey Grigorev/YandexDisk/Mama/mort-temp/")
+# setwd("~/docs/mam/r-regression-analysis")
+
+library(zoo)
+
+# reading, cleaning 
+mort = read.table("SSC_Mo_MJJAS.txt", sep='\t', header=T, dec=',')
+
+names(mort)[9] = "DIS"
+names(mort)[10] = "TOS"
+names(mort)[4] = 'mort.total'
+names(mort)[5] = 'mort.over65'
+names(mort)[6] = 'mort.women'
+names(mort)[7] = 'mort.men'
+
+mort = mort[complete.cases(mort),]
+
+mort$date = as.Date(mort$Date.1, format="%d.%m.%Y")
+mort = subset(mort, select = -c(City, Date, Date.1))
+
+wd = weekdays(mort$date, abbreviate=T)
+wd = factor(wd, levels=c("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"))
+levels(wd) = 1:7
+
+mort$date.dof = wd
+mort$date.is.workday = wd %in% 1:5
+
+mort$year = as.factor( format(mort$date, "%Y") )
+mort$month = as.factor( format(mort$date, "%m") )
+
+
+holidays = read.table("publicholidays-russia.txt")
+names(holidays) = 'date'
+holidays$date = as.Date(holidays$date, format="%d-%m-%Y")
+
+
+mort$is.holiday = mort$date %in% holidays$date
+
+
+temp = read.table("Khb_Temp_Daily.txt", sep=';', header=F, dec=',')
+temp = temp[complete.cases(temp), ]
+
+temp$date = as.Date(ISOdate(temp$V2, temp$V3, temp$V4))
+mort.date = range(mort$date)
+temp = temp[temp$date >= mort.date[1] & temp$date <= mort.date[2], ]
+temp = subset(temp, select=c(date, V6, V8, V10))
+
+names(temp)[2] = 't.min'
+names(temp)[3] = 't.mean'
+names(temp)[4] = 't.max'
+temp$t.amp = temp$t.max - temp$t.min
+
+# mort0 = merge(mort, temp, by='date', all.x=T)
+# View(mort0[!complete.cases(mort0), ])
+# need to get data for last septermber!
+
+mort = merge(mort, temp, by='date')
+```
+
+
+## Предварительный анализ
+
+### Проверка на нормальность
+
+```{r warning=FALSE}
+h = hist(mort$mort.total, probability=T, breaks=21,
+         main="Гистограмма общей смертности",
+         xlab='Смертность', ylab='Плотность')
+dens = density(mort$mort.total, adjust=2)
+lines(dens, col="grey", lwd=2, lty=2)
+
+mort.sd = sd(mort$mort.total)
+mort.mean = mean(mort$mort.total)
+
+
+x = seq(from=min(h$breaks), to=max(h$breaks), by=0.5)
+y = dnorm(x=x, mean=mort.mean, sd=mort.sd)
+lines(x=x, y=y, lwd=1)
+
+
+legend(30, 0.08, c('плотность', 'норм. расп.'), 
+       col=c('grey', 'black'),
+       lwd=c(2, 1), lty=c(2, 1), bty='n')
+```
+
+Данные выглядят нормально
+
+
+```{r fig.width=5, fig.height=5, warning=FALSE}
+qqnorm(mort$mort.total, cex=0.7,
+       main='График нормальной вероятности',
+       ylab='Значение', xlab='Ожидаемое нормальное')
+qqline(mort$mort.total, lwd=1, lty=2, col='gray')
+```
+
+
+### Смертность в разные месяцы
+
+```{r warning=FALSE}
+boxplot(mort$mort.total ~ mort$month, col='grey',
+        names=c('Май', 'Июнь', 'Июль', 'Август', 'Сентябрь'), 
+        ylab='Смертность, чел.')
+```
+
+```{r}
+by(mort$mort.total, mort$month, summary)
+
+aov.m.mon = aov(mort$mort.total ~ mort$month)
+summary(aov.m.mon)
+```
+
+Тест ANOVA (Дисперсионный анализ) показал, что различия между месяцами статистически значимы (для уровня значимости $\alpha = 0.05$)
+
+```{r}
+TukeyHSD(aov.m.mon, conf.level=0.95)
+```
+
+Видно, что отличия только между 05 и 08 месяцами
+
+
+
+### Смертность в разные годы
+
+```{r warning=FALSE}
+boxplot(mort$mort.total ~ mort$year, col='grey',
+        xlab='Год', ylab='Смертность, чел')
+```
+
+```{r}
+by(mort$mort.total, mort$year, summary)
+
+aov.m.yer = aov(mort$mort.total ~ mort$year)
+summary(aov.m.yer)
+
+t = TukeyHSD(aov.m.yer, conf.level=0.95)[['mort$year']]
+t = row.names(t[t[, 4] < 0.05, ])
+
+d = data.frame(year1=c(substring(t, 1, 4), substring(t, 6, 9)),
+               year2=c(substring(t, 6, 9), substring(t, 1, 4)))
+
+aggregate(d$year2 ~ d$year1, FUN=paste)
+```
+
+
+Отличия статистически значимые, но на практике - нет. По графику видно, что нет лет с большими выбросами по смертости. Возможная причина наблюдаемых колебаний смертности - сезонность
+
+
+### Смертность в выходные и празники
+
+
+Смертность по дням недели
+
+
+```{r warning=FALSE}
+boxplot(mort$mort.total ~ mort$date.dof, col='grey', 
+        ylab='Смертность, чел', 
+        names=c('Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'))
+```
+
+```{r}
+by(mort$mort.total, mort$date.dof, summary)
+summary(aov(mort$mort.total ~ mort$date.dof))
+```
+
+Ничего интересного 
+
+
+Смертность в праздники
+
+(Красивые графики ниже)
+
+```{r}
+boxplot(mort$mort.total ~ mort$is.holiday, col='grey')
+by(mort$mort.total, mort$is.holiday, summary)
+
+with(mort, 
+     t.test(mort.total[is.holiday], 
+            mort.total[!is.holiday], 
+            alternative='greater'))
+```
+
+Ничего интересного
+
+Смертность в выходные
+
+```{r}
+boxplot(mort$mort.total ~ mort$date.is.workday, col='orange')
+by(mort$mort.total, mort$date.is.workday, summary)
+
+with(mort, 
+     t.test(mort.total[!date.is.workday], 
+            mort.total[date.is.workday], 
+            alternative='greater'))
+```
+
+
+Вероятность ($p$-value) того, что смертность в выходые больше, чем в обычные дни - 0.10. Достаточно высоко, но не достатоночно для 95% значимости (т.е. при $\alpha = 0.05$).
+
+
+Смертность и в празники и в выходные
+
+```{r}
+off = (!mort$date.is.workday) | mort$is.holiday
+boxplot(mort$mort.total ~ off, col='grey')
+```
+
+```{r}
+by(mort$mort.total, off, summary)
+t.test(mort$mort.total[off], mort$mort.total[!off],
+       alternative='greater')
+```
+
+тоже ничего
+
+
+Если праздник/выходной был вчера или позавчера
+
+```{r}
+off.lag.1 = c(FALSE, lag(zoo(off), k=-1))
+boxplot(mort$mort.total ~ off.lag.1, col='grey')
+t.test(mort$mort.total[off.lag.1], mort$mort.total[!off.lag.1],
+       alternative='greater')
+
+off.lag.2 = c(F, F, lag(zoo(off), k=-2))
+boxplot(mort$mort.total ~ off.lag.2, col='grey')
+t.test(mort$mort.total[off.lag.2], mort$mort.total[!off.lag.2],
+       alternative='greater')
+```
+
+В обоих случаях ничего интересного
+
+
+Красивый график:
+
+```{r fig.width=8, fig.height=3, warning=FALSE}
+par(mfrow=c(1, 4))
+par(mar=c(7, 2, 3, 2))
+
+boxplot(mort$mort.total ~ mort$is.holiday, col='grey', 
+        main='(а)', names=c('Выходной', 'Рабочий'), las=2)
+boxplot(mort$mort.total ~ mort$date.is.workday, col='grey',
+        main='(б)', names=c('Праздник', 'Не праздник'), las=2)
+boxplot(mort$mort.total ~ off, col='grey',
+        main='(в)', names=c('Праздник\nили выходной', 'Не праздник'), las=2)
+boxplot(mort$mort.total ~ off.lag.1, col='grey',
+        main='(г)', names=c('Вчера был\nвыходной', 'Не было\nвыходного'), las=2)
+
+par(mar=c(5, 4, 4, 2) + 0.1)
+par(mfrow=c(1, 1))
+```
+
+
+### Выбросы по смертности
+
+Смотрим, какие данные по смертности (общей) выходят за 95-й перцентиль (`r qnorm(p=0.95)` сигм)
+
+Порог: `r mort.mean + qnorm(p=0.95) * mort.sd`
+
+
+```{r}
+th = mort.mean + qnorm(p=0.95) * mort.sd
+m.out = mort$mort.total >= th
+sum(m.out)
+mort$date[m.out]
+```
+
+
+Выходные
+```{r}
+mort$date[mort$is.holiday & m.out]
+```
+
+Два дня приходятся на выходные
+
+
+Выходные и празники
+```{r}
+mort$date[off & m.out]
+sum(off & m.out)
+```
+
+29 дней, выпавших на выходные и празники
+
+
+```{r}
+mort$date[off.lag.1 & m.out]
+sum(off.lag.1 & m.out)
+```
+
+33 дня следующих за праздниками
+
+
+Разница в днях между выбросами:
+```{r}
+diff(which(m.out)) 
+sum(diff(which(m.out)) == 1)
+```
+
+Всего 5 раз было два последовательных дня с аномальной смертностью и ни разу три последовательных дня (было бы 2 единицы подряд)
+
+
+
+## Регрессии
+```{r}
+library(MASS)
+```
+
+### Регрессия по всем данным
+
+```{r}
+fit = lm(mort.total ~ + t.mean + t.amp + SSC + DIS + TOS + 
+           + date.is.workday + is.holiday, data=mort)
+summary(fit)
+```
+
+$R^2 = 0.213$ - оч. мало
+
+
+```{r warning=FALSE}
+plot(fit$residuals, cex=0.5, bty='n', xaxt='n', xlab='', ylab='Остаток')
+```
+
+
+Уберем часть переменных, которые не влияют на результат
+
+```{r}
+step = stepAIC(fit, direction="backward", trace=FALSE)
+summary(step)
+```
+
+$R^2 = 0.219$ - оч. мало
+
+
+```{r warning=FALSE} 
+plot(step$residuals, cex=0.5, bty='n', xaxt='n', xlab='', ylab='Остаток')
+```
+
+
+### Регрессия средней дневной смертности
+
+Посчитаем среднюю смертность за каждый день для каждого TOS, а так же среднюю температуру, амплитуду и t.at
+
+```{r}
+daily.mort.mean = aggregate(mort.total ~ TOS, data=mort, FUN=mean)
+daily.t.mean =    aggregate(t.mean ~ TOS, data=mort, FUN=mean)
+daily.t.amp  =    aggregate(t.amp ~ TOS, data=mort, FUN=mean)
+daily.t.at  =     aggregate(T.AT ~ TOS, data=mort, FUN=mean)
+
+df = merge(daily.mort.mean, daily.t.mean, by='TOS')
+df = merge(df, daily.t.amp, by='TOS')
+df = merge(df, daily.t.at, by='TOS')
+
+plot(df$mort.total ~ df$TOS)
+```
+
+
+Построим регрессию по всем переменным
+
+```{r}
+fit = lm(mort.total ~ ., data=df)
+summary(fit)
+```
+
+```{r warning=FALSE}
+plot(fit$residuals, cex=0.5, bty='n', xaxt='n', xlab='', ylab='Остаток')
+```
+
+$R^2 = 0.05$ - стало больше, но все еще плохо
+
+Пробуем исключить какие-нибудь переменные
+
+```{r}
+step = stepAIC(fit, direction="backward", trace=F)
+step$anova
+summary(step)
+```
+
+$R^2 = 0.057$
+
+```{r warning=FALSE}
+plot(step$residuals, cex=0.5, bty='n', xaxt='n', xlab='', ylab='Остаток')
+```
+
+Ничего интересного
+
+
+### Осреднение в окошке
+
+$w$ - размер окошка
+
+```{r}
+rolled.by.mean = function(w) {
+  rol.t.m = rollapply(zoo(df$t.mean), 
+                      width=w, by=1, FUN=mean, align="center")
+  rol.mor = rollapply(zoo(df$mort.total), 
+                      width=w, by=1, FUN=mean, align="center")
+  rol.t.a = rollapply(zoo(df$t.amp), 
+                      width=w, by=1, FUN=mean, align="center")
+  rol.t.at = rollapply(zoo(df$T.AT), 
+                       width=w, by=1, FUN=mean, align="center")
+  
+  idx = index(rol.t.m)
+  df.r = data.frame(tos=df$TOS[idx],
+                    rol.mort=rol.mor, rol.t.mean=rol.t.m,
+                    rol.t.amp=rol.t.a, rol.t.at=rol.t.at)
+  df.r
+}
+```
+
+
+```{r}
+plot.prediction = function(fit, df.r) {
+  plot(df.r$rol.mort, bty='n', xaxt='n', xlab='', 
+      ylab='Смертность, чел.')
+  
+  lm1.p = predict(fit, newdata=df.r, interval='confidence', level=0.99)
+  
+  n = length(lm1.p[,1])
+  polygon(x=c(1:n, n:1),
+          y=c(lm1.p[,2], rev(lm1.p[,3])),
+          col=adjustcolor('grey', 1/4), border=NA)
+
+  lines(lm1.p[,2], col='grey', lwd=1)
+  lines(lm1.p[,3], col='grey', lwd=1)
+
+  lines(lm1.p[,1], lwd=2)
+}
+```
+
+```{r}
+coefficients = function(fit) {
+  sum1 = summary(fit)
+  coef = sum1$coefficients[, 1]
+  paste(round(coef, 3), names(coef), collapse=' + ')
+}
+```
+
+```{r}
+rolling.mean.reg = function(w) {
+  df.r = rolled.by.mean(w)  
+  
+  fit = lm(rol.mort ~ ., data=df.r)
+  sum1 = summary(fit)
+  
+  plot(fit$residuals, cex=0.5, bty='n', xaxt='n', xlab='', ylab='Остаток')
+  plot.prediction(fit, df.r)
+
+  print('stepwards')
+  step = stepAIC(fit, direction="backward", trace=FALSE)
+
+  sum2 = summary(step)
+
+  plot(step$residuals, cex=0.5, bty='n', xaxt='n', xlab='', ylab='Остаток')
+  plot.prediction(step, df.r)
+  
+  list(coef.all=coefficients(fit),
+       r2.all=c(R2=sum1$r.squared, adjR2=sum1$adj.r.squared),
+       coef.step=coefficients(step),
+       r2.step=c(R2=sum2$r.squared, adjR2=sum2$adj.r.squared))
+}
+```
+
+
+#### Модель
+
+Модель: ```rol.mort ~ tos + rol.t.mean + rol.t.amp + rol.t.at```
+
+
+
+#### Окошко $w = 3$
+
+```{r warning=FALSE}
+rolling.mean.reg(3)
+```
+
+Со всеми переменными: $R^2 = 0.1929$
+
+Модель ```tos + rol.t.amp```: $R^2 = 0.0.1989$
+
+
+#### Окошко $w = 9$
+
+```{r warning=FALSE}
+rolling.mean.reg(9)
+```
+
+
+Со всеми переменными: $R^2 = 0.494$
+
+Ни одной переменной убрать не удалось - все переменные важны
+
+
+#### Окошко $w = 15$
+
+```{r warning=FALSE}
+rolling.mean.reg(15)
+```
+
+
+Со всеми переменными: $R^2 = 0.680$
+
+Ни одной переменной убрать не удалось - все переменные важны
+
+
+#### Окошко $w = 30$
+
+```{r warning=FALSE}
+rolling.mean.reg(30)
+```
+
+
+Со всеми переменными: $R^2 = 0.8829$
+
+Можно оставить только перменные tos и t.mean и получить $R^2 = 0.8811$
+
+
+### Найдем MMT
+
+```{r}
+library(splines)
+```
+
+```{r}
+h = hist(mort$t.mean, breaks=18)
+b = h$breaks
+
+centers = b[-length(b)] + 1
+
+binned = cut(mort$t.mean, breaks=b)
+levels(binned) = centers
+binned = as.numeric(as.character(binned))
+mort$binned.t = binned
+
+avg.2 = aggregate(mort$mort.total ~ mort$binned.t, FUN=mean)
+names(avg.2) = c('binned.t', 'M')
+```
+
+```{r}
+add.fit = function(fit, x) {
+  pred = predict(fit, data.frame(binned.t=x), 
+                 interval='confidence', level=0.95)
+  
+  polygon(x=c(x, rev(x)),
+          y=c(pred[,2], rev(pred[,3])),
+          col=adjustcolor('grey', 1/8), border=NA)
+  
+  lines(x, pred[,2], col='grey', lwd=1)
+  lines(x, pred[,3], col='grey', lwd=1)
+  
+  lines(x, pred[,1], lwd=2)
+  
+}
+```
+
+```{r warning=FALSE}
+plot(avg.2$M ~ avg.2$binned.t, cex=0.7, bty='n',
+     xlab='Температура, °C', ylab='Смертность, чел.',
+     xaxt='n')
+
+axis(side=1, at=seq(3, 31, 2))
+
+lines(avg.2$M ~ avg.2$binned.t)
+```
+
+
+```{r warning=FALSE}
+plot(avg.2$M ~ avg.2$binned.t, cex=0.7, bty='n',
+     xlab='Температура, °C', ylab='Смертность, чел.',
+     xaxt='n')
+
+axis(side=1, at=seq(3, 31, 2))
+
+sm = lm(M ~ bs(binned.t, degree=3, knots=2), data=avg.2)
+add.fit(sm, avg.2$binned.t)
+```
+
+```{r warning=FALSE}
+barplot(table(mort$binned.t), xlab='Градусы',
+        ylab='Частота')
+```
+
+```{r}
+table(mort$binned.t)
+```
+
+Наблюдения для 3-х и 31-го градусов похожи на выброс - исключим их из рассмотрения (наблюдение для 29 градусов оставим)
+
+
+```{r}
+avg.2 = avg.2[-c(1, 15), ]
+```
+
+
+
+```{r warning=FALSE}
+plot(avg.2$M ~ avg.2$binned.t, cex=0.7, bty='n',
+     xlab='Температура, °C', ylab='Смертность, чел.',
+     xaxt='n')
+
+axis(side=1, at=seq(5, 29, 2))
+
+lines(avg.2$M ~ avg.2$binned.t)
+```
+
+Минимальная смертность в `r avg.2$M[avg.2$binned.t == 17]` достигается при температуре 19 градусов 
+
+
+```{r warning=FALSE}
+plot(avg.2$M ~ avg.2$binned.t, cex=0.7, bty='n',
+     xlab='Температура, °C', ylab='Смертность, чел.',
+     xaxt='n')
+
+axis(side=1, at=seq(5, 31, 2))
+
+sm = lm(M ~ bs(binned.t, degree=3, knots=2), data=avg.2)
+add.fit(sm, avg.2$binned.t)
+```
+
+Для полинома минимум между 17 и 19 градусами
+
+Уравнение для полинома (<https://ru.wikipedia.org/wiki/B-сплайн>)
+
+```{r}
+summary(sm)
+```
+
+
+Разобъем данные на две части: до 19 градусов и после, и для каждой в отдельности построим прямую 
+
+```{r}
+t = 19
+avg2before = avg.2[avg.2$binned.t <= t, ]
+avg2after = avg.2[avg.2$binned.t >= t, ]
+```
+
+До 19:
+
+```{r warning=FALSE}
+plot(M ~ binned.t, data=avg2before, cex=0.7, bty='n',
+     ylim=c(20, 24),
+     xlab='Температура, °C', ylab='Смертность, чел.',
+     xaxt='n')
+
+axis(side=1, at=seq(5, 19, 2))
+
+fit = lm(M ~ binned.t, data=avg2before)
+add.fit(fit, avg.2$binned.t)
+```
+
+```{r}
+summary(fit)
+coefficients(fit)
+```
+
+$R^2 = 0.6989$
+
+
+После 19
+
+```{r warning=FALSE}
+plot(M ~ binned.t, data=avg2after, cex=0.7, bty='n',
+     ylim=c(15, 31), 
+     xlab='Температура, °C', ylab='Смертность, чел.',
+     xaxt='n')
+
+axis(side=1, at=seq(19, 29, 2))
+
+fit = lm(M ~ binned.t, data=avg2after)
+add.fit(fit, avg.2$binned.t)
+```
+
+```{r}
+summary(fit)
+coefficients(fit)
+```
+
+$R^2 = 0.842$
+
+
+Сразу две прямые
+
+```{r}
+plot(M ~ binned.t, data=avg.2, cex=0.7, bty='n',
+     xlab='Температура, °C', ylab='Смертность, чел.',
+     xaxt='n')
+
+axis(side=1, at=seq(5, 29, 2))
+
+fit1 = lm(M ~ binned.t, data=avg2after)
+abline(fit1, lwd=2)
+fit2 = lm(M ~ binned.t, data=avg2before)
+abline(fit2, lwd=2)
+```
+
+
+Место пересечения прямых:
+
+```{r}
+cm = rbind(coef(fit1), coef(fit2))
+point = c(-solve(cbind(cm[,2], -1)) %*% cm[,1])
+point
+```
+
+
+```{r fig.width=7, fig.height=4, warning=FALSE}
+d = 9/15
+# fig=c(x1, x2, y1, y2)
+par(fig=c(0, d, 0, 1))
+
+
+#c(bottom, left, top, right)
+par(mar=c(4, 4, 0, 1))
+plot(M ~ binned.t, data=avg2before, cex=0.7, bty='n',
+     ylim=c(20, 31), ylab='Смертность, чел.',
+     xaxt='n', xlab='Температура, °C')
+
+axis(side=1, at=seq(5, 19, 2))
+
+fit = lm(M ~ binned.t, data=avg2before)
+add.fit(fit, avg.2$binned.t)
+
+par(fig=c(d, 1, 0, 1), new=TRUE)
+
+#c(bottom, left, top, right)
+par(mar=c(4, 1.5, 0, 1))
+plot(M ~ binned.t, data=avg2after, cex=0.7, bty='n',
+     ylim=c(20, 31), xaxt='n', yaxt='n', xlab='Температура, °C')
+
+axis(side=1, at=seq(19, 29, 2))
+
+fit = lm(M ~ binned.t, data=avg2after)
+add.fit(fit, avg.2$binned.t)
+
+par(mar=c(5, 4, 4, 2) + 0.1)
+
+
+```
+
+
+```{r fig.width=7, fig.height=4, warning=FALSE}
+Cairo(width=30, height=16, units='cm', file='mtt.png', 
+      bg='white',  pointsize=12, dpi=72)
+
+d = 9/15
+# fig=c(x1, x2, y1, y2)
+par(fig=c(0, d, 0, 1))
+
+
+#c(bottom, left, top, right)
+par(mar=c(4, 4, 0, 1))
+plot(M ~ binned.t, data=avg2before, cex=0.7, bty='n',
+     ylim=c(20, 31), ylab='Смертность, чел.',
+     xaxt='n', xlab='Температура, °C')
+
+axis(side=1, at=seq(5, 19, 2))
+
+fit = lm(M ~ binned.t, data=avg2before)
+add.fit(fit, avg.2$binned.t)
+
+par(fig=c(d, 1, 0, 1), new=TRUE)
+
+#c(bottom, left, top, right)
+par(mar=c(4, 1.5, 0, 1))
+plot(M ~ binned.t, data=avg2after, cex=0.7, bty='n',
+     ylim=c(20, 31), xaxt='n', yaxt='n', xlab='Температура, °C')
+
+axis(side=1, at=seq(19, 29, 2))
+
+fit = lm(M ~ binned.t, data=avg2after)
+add.fit(fit, avg.2$binned.t)
+
+par(mar=c(5, 4, 4, 2) + 0.1)
+
+dev.off()
+```
