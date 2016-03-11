@@ -8,8 +8,7 @@ output: html_document
 
 ```{r echo=FALSE, warning=FALSE, message=FALSE}
 default.par = par()
-setwd("C:/Users/Alexey Grigorev/YandexDisk/Mama/mort-temp/")
-# setwd("~/docs/mam/r-regression-analysis")
+setwd("~/rproj/khb-mortality-analysis/data")
 
 library(zoo)
 
@@ -28,8 +27,12 @@ mort = mort[complete.cases(mort),]
 mort$date = as.Date(mort$Date.1, format="%d.%m.%Y")
 mort = subset(mort, select = -c(City, Date, Date.1))
 
+Sys.setlocale("LC_ALL","Russian")
+
 wd = weekdays(mort$date, abbreviate=T)
-wd = factor(wd, levels=c("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"))
+wd = factor(wd, levels=c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))
+# wd = factor(wd, levels=c("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"))
+
 levels(wd) = 1:7
 
 mort$date.dof = wd
@@ -59,10 +62,6 @@ names(temp)[2] = 't.min'
 names(temp)[3] = 't.mean'
 names(temp)[4] = 't.max'
 temp$t.amp = temp$t.max - temp$t.min
-
-# mort0 = merge(mort, temp, by='date', all.x=T)
-# View(mort0[!complete.cases(mort0), ])
-# need to get data for last septermber!
 
 mort = merge(mort, temp, by='date')
 ```
@@ -163,7 +162,7 @@ aggregate(d$year2 ~ d$year1, FUN=paste)
 
 ```{r warning=FALSE}
 boxplot(mort$mort.total ~ mort$date.dof, col='grey', 
-        ylab='Смертность, чел', 
+        ylab='Смертность, чел',
         names=c('Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'))
 ```
 
@@ -748,8 +747,8 @@ par(mar=c(5, 4, 4, 2) + 0.1)
 
 
 ```{r fig.width=7, fig.height=4, warning=FALSE}
-Cairo(width=30, height=16, units='cm', file='mtt.png', 
-      bg='white',  pointsize=12, dpi=72)
+#Cairo(width=30, height=16, units='cm', file='mtt.png', 
+#      bg='white',  pointsize=12, dpi=72)
 
 d = 9/15
 # fig=c(x1, x2, y1, y2)
@@ -781,5 +780,5 @@ add.fit(fit, avg.2$binned.t)
 
 par(mar=c(5, 4, 4, 2) + 0.1)
 
-dev.off()
+#dev.off()
 ```
