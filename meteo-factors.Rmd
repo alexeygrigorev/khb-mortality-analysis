@@ -1,0 +1,76 @@
+---
+title: "Influence of Metheorogical Factors on Health"
+author: "Alexey Grigorev"
+date: "12/03/2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(magrittr)
+```
+
+Reading the data
+
+```{r}
+default.par = par()
+setwd("~/rproj/khb-mortality-analysis/data")
+
+mort = 
+  read.table("SSC_Mo.txt", sep='\t', header=T, dec=',') %>%
+  filter(complete.cases(.)) %>%
+  select(date=Date.1, mortality=Mo.W.M) %>%
+  mutate(date=as.Date(date, format="%d.%m.%Y"))
+
+mort.date = range(mort$date)
+
+temp = 
+  read.table("Khb_Temp_Daily.txt", sep=';', header=F, dec=',') %>% 
+  filter(complete.cases(.)) %>%
+  mutate(date=as.Date(ISOdate(V2, V3, V4))) %>%
+  select(date, t.min=V6, t.mean=V8, t.max=V10) %>% 
+  filter(date >= mort.date[1] & date <= mort.date[2])
+
+holidays = read.table("publicholidays-russia.txt") %>% 
+  select(date=V1) %>% 
+  mutate(date=as.Date(date, format="%d-%m-%Y"))
+
+press = read.table('Khb_press_dew_wind.txt', sep='\t', header=T, dec='.')
+press = press %>% 
+  mutate(date=as.Date(ISOdate(Year, Month, Day)),
+         wind.speed=sqrt(uw * uw + vw * vw)) %>%
+  select(date, pressure=P0, dew.point=Td, temp=Ta, wind.speed) %>% 
+  group_by(date) %>%
+  summarise(pressure.ampl=max(pressure, na.rm=T)-min(pressure, na.rm=T),
+            pressure=mean(pressure, na.rm=T),
+            dew.point.ampl=max(dew.point, na.rm=T)-min(dew.point, na.rm=T),
+            dew.point=mean(dew.point, na.rm=T),
+            wind.speed.max=max(wind.speed, na.rm=T),
+            wind.speed.min=min(wind.speed, na.rm=T),
+            wind.speed.ampl=wind.speed.max-wind.speed.min,
+            wind.speed=mean(wind.speed, na.rm=T),
+            t.min=min(temp, na.rm=T), 
+            t.max=max(temp, na.rm=T),
+            t.mean=round(mean(temp, na.rm=T), digits=3))
+
+temp2 = press %>%
+  select(date, t.min, t.mean, t.max) %>%
+  filter(date > max(temp$date) & date <= mort.date[2])
+
+temp = rbind(temp, temp2)
+
+press = press %>%
+  select(-c(t.min, t.mean, t.max))
+
+temp = merge(temp, press, by='date')
+merged = merge(mort, temp, by='date')
+```
+
+Some information about wind vectors: http://wx.gmu.edu/dev/clim301/lectures/wind/wind-uv.html
+
+
+

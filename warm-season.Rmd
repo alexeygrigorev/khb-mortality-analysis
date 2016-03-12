@@ -27,8 +27,6 @@ mort = mort[complete.cases(mort),]
 mort$date = as.Date(mort$Date.1, format="%d.%m.%Y")
 mort = subset(mort, select = -c(City, Date, Date.1))
 
-Sys.setlocale("LC_ALL","Russian")
-
 wd = weekdays(mort$date, abbreviate=T)
 wd = factor(wd, levels=c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))
 # wd = factor(wd, levels=c("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"))
