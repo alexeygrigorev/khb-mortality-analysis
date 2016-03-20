@@ -549,13 +549,12 @@ add.fit = function(fit, x) {
   
   polygon(x=c(x, rev(x)),
           y=c(pred[,2], rev(pred[,3])),
-          col=adjustcolor('grey', 1/8), border=NA)
+          col=adjustcolor('grey', 1/4), border=NA)
   
-  lines(x, pred[,2], col='grey', lwd=1)
-  lines(x, pred[,3], col='grey', lwd=1)
+  lines(x, pred[,2], col='black', lwd=1.5, lty='dashed')
+  lines(x, pred[,3], col='black', lwd=1.5, lty='dashed')
   
   lines(x, pred[,1], lwd=2)
-  
 }
 ```
 
