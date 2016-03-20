@@ -740,43 +740,4 @@ add.fit(fit, avg.2$binned.t)
 
 par(mar=c(5, 4, 4, 2) + 0.1)
 
-
-```
-
-
-```{r fig.width=7, fig.height=4, warning=FALSE}
-#Cairo(width=30, height=16, units='cm', file='mtt.png', 
-#      bg='white',  pointsize=12, dpi=72)
-
-d = 9/15
-# fig=c(x1, x2, y1, y2)
-par(fig=c(0, d, 0, 1))
-
-
-#c(bottom, left, top, right)
-par(mar=c(4, 4, 0, 1))
-plot(M ~ binned.t, data=avg2before, cex=0.7, bty='n',
-     ylim=c(20, 31), ylab='Смертность, чел.',
-     xaxt='n', xlab='Температура, °C')
-
-axis(side=1, at=seq(5, 19, 2))
-
-fit = lm(M ~ binned.t, data=avg2before)
-add.fit(fit, avg.2$binned.t)
-
-par(fig=c(d, 1, 0, 1), new=TRUE)
-
-#c(bottom, left, top, right)
-par(mar=c(4, 1.5, 0, 1))
-plot(M ~ binned.t, data=avg2after, cex=0.7, bty='n',
-     ylim=c(20, 31), xaxt='n', yaxt='n', xlab='Температура, °C')
-
-axis(side=1, at=seq(19, 29, 2))
-
-fit = lm(M ~ binned.t, data=avg2after)
-add.fit(fit, avg.2$binned.t)
-
-par(mar=c(5, 4, 4, 2) + 0.1)
-
-#dev.off()
 ```

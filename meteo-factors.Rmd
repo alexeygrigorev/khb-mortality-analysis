@@ -12,9 +12,11 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(dplyr)
 library(magrittr)
+library(ggplot2)
+library(xts)
 ```
 
-Reading the data
+## Reading the data
 
 ```{r}
 default.par = par()
@@ -34,10 +36,6 @@ temp =
   mutate(date=as.Date(ISOdate(V2, V3, V4))) %>%
   select(date, t.min=V6, t.mean=V8, t.max=V10) %>% 
   filter(date >= mort.date[1] & date <= mort.date[2])
-
-holidays = read.table("publicholidays-russia.txt") %>% 
-  select(date=V1) %>% 
-  mutate(date=as.Date(date, format="%d-%m-%Y"))
 
 press = read.table('Khb_press_dew_wind.txt', sep='\t', header=T, dec='.')
 press = press %>% 
@@ -73,4 +71,46 @@ merged = merge(mort, temp, by='date')
 Some information about wind vectors: http://wx.gmu.edu/dev/clim301/lectures/wind/wind-uv.html
 
 
+### Holidays
 
+
+```{r}
+wd = weekdays(merged$date, abbreviate=T)
+wd = factor(wd, levels=c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))
+levels(wd) = 1:7
+
+holidays = read.table("publicholidays-russia.txt") %>% 
+  select(date=V1) %>% 
+  mutate(date=as.Date(date, format="%d-%m-%Y"))
+
+merged$is.holiday = merged$date %in% holidays$date
+merged$date.dof = wd
+merged$is.workday = wd %in% 1:5
+```
+
+
+###Extra Indicators 
+
+Will calculate:
+
+- `ET_M` Effective Temperature by Missenard
+- `ET_S` Effective Temperature by Stedman 
+- 
+
+```{r}
+merged$ET_S = 2.719 + 0.994 * merged$t.mean + 0.016 * merged$dew.point ** 2
+
+ggplot(data=merged) + 
+  geom_histogram(aes(x=ET_S, y=..density.., fill='ET_S'), 
+                 binwidth=2.5, col='black', alpha=0.3) + 
+  geom_density(aes(x=ET_S), col='black') +
+  geom_histogram(aes(x=t.mean, y=..density.., fill='T'), 
+                 binwidth=2.5, col='black',  alpha=0.3) + 
+  geom_density(aes(x=t.mean), col='blue') +
+  guides(fill=guide_legend(title='Temperature'))
+  labs(x='Temperature', y='Count')
+  
+
+cut(tmp$ET_S, breaks=c(-Inf, 18, 23, 28, Inf))
+
+```
