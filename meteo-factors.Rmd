@@ -7,21 +7,24 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+default.par = par()
+
+home.dir = "~/rproj/khb-mortality-analysis/data"
+setwd(home.dir)
+knitr::opts_knit$set(root.dir=home.dir)
 ```
 
-```{r}
+```{r, warning=FALSE}
 library(dplyr)
 library(magrittr)
 library(ggplot2)
+library(tidyr)
 library(xts)
 ```
 
 ## Reading the data
 
 ```{r}
-default.par = par()
-setwd("~/rproj/khb-mortality-analysis/data")
-
 mort = 
   read.table("SSC_Mo.txt", sep='\t', header=T, dec=',') %>%
   filter(complete.cases(.)) %>%
@@ -93,24 +96,41 @@ merged$is.workday = wd %in% 1:5
 
 Will calculate:
 
+- `RH` - relative humidity, formula taken from http://andrew.rsmas.miami.edu/bmcnoldy/Humidity.html
+
+Indexes for warm periods:
+
 - `ET_M` Effective Temperature by Missenard
+  - $\text{ET}_M = T - 0.4 \, (T - 10)\, (1 - \text{RH})$, where $T$ is temperature and $\text{RH}$ is relative humidity
 - `ET_S` Effective Temperature by Stedman 
-- 
+  - $\text{ET}_S = 2.719 + 0.994 \, T + 0.016 \, T_d^2$ where $T_d$ is the dewpoint temperature 
+
+Indexes for cold period
+
+- `WCI_S` Siple:
+  - $\text{WCI}_S = (10.45 + 10 * \sqrt{v} - v) \, (33 - T)$
+- `WCI_C` Court:
+  - $\text{WCI}_C = (9 + 10.9 * \sqrt{v} - v) \, (33 - T)$
+- `WCI_H` Hill:
+  - $\text{WCI}_H = (0.13 + 0.47 * \sqrt{v} - v) \, (36.6 - T)$
+
 
 ```{r}
+merged$RH = exp(17.625 * merged$dew.point / (243.04 + merged$dew.point)) /
+            exp(17.625 * merged$t.mean / (243.04 + merged$t.mean))
+
 merged$ET_S = 2.719 + 0.994 * merged$t.mean + 0.016 * merged$dew.point ** 2
+merged$ET_M = merged$t.mean - 0.4 * (merged$t.mean - 10) * (1 - merged$RH)
 
-ggplot(data=merged) + 
-  geom_histogram(aes(x=ET_S, y=..density.., fill='ET_S'), 
-                 binwidth=2.5, col='black', alpha=0.3) + 
-  geom_density(aes(x=ET_S), col='black') +
-  geom_histogram(aes(x=t.mean, y=..density.., fill='T'), 
-                 binwidth=2.5, col='black',  alpha=0.3) + 
-  geom_density(aes(x=t.mean), col='blue') +
-  guides(fill=guide_legend(title='Temperature'))
-  labs(x='Temperature', y='Count')
+temp_comp = merged %>% 
+  select(Stedman.ET=ET_S, Missenard.ET=ET_M, Mean.T=t.mean) %>%
+  gather(key='key', value='temp')
+
+ggplot(data=temp_comp, aes(x=temp, fill=key)) + 
+  geom_density(alpha=0.5) +
+  labs(x='Temperature', y='Density') + 
+  ggtitle("Comparison of T and ETs")
   
-
-cut(tmp$ET_S, breaks=c(-Inf, 18, 23, 28, Inf))
-
+# cut(tmp$ET_S, breaks=c(-Inf, 18, 23, 28, Inf))s
 ```
+
