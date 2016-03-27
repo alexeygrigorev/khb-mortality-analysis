@@ -105,6 +105,27 @@ Indexes for warm periods:
 - `ET_S` Effective Temperature by Stedman 
   - $\text{ET}_S = 2.719 + 0.994 \, T + 0.016 \, T_d^2$ where $T_d$ is the dewpoint temperature 
 
+```{r}
+merged$RH = exp(17.625 * merged$dew.point / (243.04 + merged$dew.point)) /
+            exp(17.625 * merged$t.mean / (243.04 + merged$t.mean))
+
+merged$ET_S = 2.719 + 0.994 * merged$t.mean + 0.016 * merged$dew.point ** 2
+merged$ET_M = merged$t.mean - 0.4 * (merged$t.mean - 10) * (1 - merged$RH)
+```
+
+Let's compare the effective temperature with the actual temperature
+
+```{r}
+temp_comp = merged %>% 
+  select(Stedman.ET=ET_S, Missenard.ET=ET_M, Mean.T=t.mean) %>%
+  gather(key='key', value='temp')
+
+ggplot(data=temp_comp, aes(x=temp, fill=key)) + 
+  geom_density(alpha=0.5) +
+  labs(x='Temperature', y='Density') + 
+  ggtitle("Comparison of T and ETs")
+```
+
 Indexes for cold period
 
 - `WCI_S` Siple:
@@ -116,21 +137,73 @@ Indexes for cold period
 
 
 ```{r}
-merged$RH = exp(17.625 * merged$dew.point / (243.04 + merged$dew.point)) /
-            exp(17.625 * merged$t.mean / (243.04 + merged$t.mean))
-
-merged$ET_S = 2.719 + 0.994 * merged$t.mean + 0.016 * merged$dew.point ** 2
-merged$ET_M = merged$t.mean - 0.4 * (merged$t.mean - 10) * (1 - merged$RH)
+merged$WCI_S = (10.45 + 10 * sqrt(merged$wind.speed) - merged$wind.speed) *
+               (33 - merged$t.mean)
+merged$WCI_C = (9 + 10.9 * sqrt(merged$wind.speed) - merged$wind.speed) *
+               (33 - merged$t.mean)
+merged$WCI_H = (0.13 + 0.47 * sqrt(merged$wind.speed) - merged$wind.speed) *
+               (36.6 - merged$t.mean)
 
 temp_comp = merged %>% 
-  select(Stedman.ET=ET_S, Missenard.ET=ET_M, Mean.T=t.mean) %>%
+  select(WCI_S, WCI_C, WCI_H, Mean.T=t.mean) %>%
   gather(key='key', value='temp')
 
 ggplot(data=temp_comp, aes(x=temp, fill=key)) + 
   geom_density(alpha=0.5) +
   labs(x='Temperature', y='Density') + 
-  ggtitle("Comparison of T and ETs")
-  
-# cut(tmp$ET_S, breaks=c(-Inf, 18, 23, 28, Inf))s
+  ggtitle("Comparison of T and WCI")
+
 ```
 
+
+## Analysis
+
+```{r}
+moving.avg = function(data, window) {
+  rollmean(zoo(data), window, fill=list(NA, NULL, NA))
+}
+
+ggplot(data=merged, aes(y=t.mean, x=date)) +
+  geom_point(shape=20, alpha=0.2) + 
+  geom_line(aes(y=moving.avg(t.mean, 15)), color='red')
+
+ggplot(data=merged, aes(y=pressure, x=date)) +
+  geom_point(shape=20, alpha=0.2) + 
+  geom_line(aes(y=moving.avg(pressure, 15)), color='red')
+
+ggplot(data=merged, aes(y=wind.speed, x=date)) +
+  geom_point(shape=20, alpha=0.2)
+
+
+ggplot(data=merged, aes(y=WCI_S, x=date)) +
+  geom_point(shape=20, alpha=0.2)
+ggplot(data=merged, aes(y=WCI_C, x=date)) +
+  geom_point(shape=20, alpha=0.2)
+ggplot(data=merged, aes(y=WCI_H, x=date)) +
+  geom_point(shape=20, alpha=0.2)
+
+```
+
+```{r}
+ggplot(data=merged, aes(y=mortality, x=date)) +
+  geom_point(shape=20, alpha=0.2) + 
+  geom_smooth()
+```
+
+Seems there's increase in 2002-2006, so probably need to mean-normalize each year
+
+```{r}
+
+year = function(date) {
+  as.factor(format(date, "%Y"))
+}
+
+m2 = merged %>% 
+  group_by(year(date)) %>% 
+  mutate(mortality=(mortality - mean(mortality)))
+
+ggplot(data=m2, aes(y=mortality, x=date)) +
+  geom_point(shape=20, alpha=0.2) + 
+  geom_smooth()
+
+```
